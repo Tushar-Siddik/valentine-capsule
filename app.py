@@ -62,7 +62,7 @@ def init_db():
 
     try:
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS messages (
+            CREATE TABLE IF NOT EXISTS message (
                 id TEXT PRIMARY KEY,
                 encrypted TEXT NOT NULL,
                 created_date TEXT,
@@ -76,7 +76,7 @@ def init_db():
         # The rest of the schema update logic is not strictly necessary for PostgreSQL
         # if you manage schema changes with migrations, but for this app, it's fine.
         if not is_postgres:
-            cursor.execute("PRAGMA table_info(messages)")
+            cursor.execute("PRAGMA table_info(message)")
             existing_columns = [column[1] for column in cursor.fetchall()]
             
             schema_updates = {
@@ -90,7 +90,7 @@ def init_db():
             for column, col_type in schema_updates.items():
                 if column not in existing_columns:
                     print(f"Adding missing column: {column}")
-                    cursor.execute(f"ALTER TABLE messages ADD COLUMN {column} {col_type}")
+                    cursor.execute(f"ALTER TABLE message ADD COLUMN {column} {col_type}")
         
         conn.commit()
     finally:
@@ -130,9 +130,9 @@ def create():
             conn, is_postgres = get_db_connection()
             cursor = conn.cursor()
             if is_postgres:
-                sql = "INSERT INTO messages (id, encrypted, created_date, unlock_date) VALUES (%s, %s, %s, %s)"
+                sql = "INSERT INTO message (id, encrypted, created_date, unlock_date) VALUES (%s, %s, %s, %s)"
             else:
-                sql = "INSERT INTO messages (id, encrypted, created_date, unlock_date) VALUES (?, ?, ?, ?)"
+                sql = "INSERT INTO message (id, encrypted, created_date, unlock_date) VALUES (?, ?, ?, ?)"
             
             cursor.execute(sql, (msg_id, encrypted, created_date, unlock_date))
             conn.commit()
@@ -156,9 +156,9 @@ def view(msg_id):
             cursor = conn.cursor()
         
         if is_postgres:
-            sql = "SELECT * FROM messages WHERE id=%s"
+            sql = "SELECT * FROM message WHERE id=%s"
         else:
-            sql = "SELECT * FROM messages WHERE id=?"
+            sql = "SELECT * FROM message WHERE id=?"
 
         cursor.execute(sql, (msg_id,))
         row = cursor.fetchone()
@@ -273,9 +273,9 @@ def generate_image(msg_id):
             cursor = conn.cursor()
         
         if is_postgres:
-            sql = "SELECT encrypted FROM messages WHERE id=%s"
+            sql = "SELECT encrypted FROM message WHERE id=%s"
         else:
-            sql = "SELECT encrypted FROM messages WHERE id=?"
+            sql = "SELECT encrypted FROM message WHERE id=?"
 
         cursor.execute(sql, (msg_id,))
         row = cursor.fetchone()
