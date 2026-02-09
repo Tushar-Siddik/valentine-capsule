@@ -1,6 +1,5 @@
 import os
 import sqlite3
-import math
 import uuid
 import datetime
 from flask import Flask, render_template, request, redirect, url_for, jsonify, send_file
@@ -8,17 +7,94 @@ from cryptography.fernet import Fernet
 import io
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 import textwrap
+import math
 import psycopg2
+from psycopg2.extras import DictCursor # IMPORTANT: For dictionary-like results from PostgreSQL
 
 # --- CONFIGURATION ---
 app = Flask(__name__)
+
+# Define a path for the encryption key file
+KEY_FILE = "secret.key"
+
+def load_or_generate_key():
+    """Load the encryption key from a file, or generate and save a new one."""
+    if os.path.exists(KEY_FILE):
+        with open(KEY_FILE, "rb") as key_file:
+            key = key_file.read()
+    else:
+        key = Fernet.generate_key()
+        with open(KEY_FILE, "wb") as key_file:
+            key_file.write(key)
+    return key
+
+# Initialize the cipher with the persistent key
+try:
+    cipher = Fernet(load_or_generate_key())
+except Exception as e:
+    print(f"CRITICAL: Could not initialize encryption. {e}")
+    cipher = None
+
 
 # --- DATABASE SETUP ---
 # Use Render's database URL or fall back to local SQLite
 DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///database.db')
 
-# Define a path for the encryption key file
-KEY_FILE = "secret.key"
+def get_db_connection():
+    """Returns a database connection and a boolean indicating if it's PostgreSQL."""
+    if DATABASE_URL.startswith("postgres"):
+        conn = psycopg2.connect(DATABASE_URL)
+        return conn, True
+    else:
+        conn = sqlite3.connect('database.db')
+        conn.row_factory = sqlite3.Row # Make SQLite return dict-like rows
+        return conn, False
+
+def init_db():
+    """Initialize the database and ensure the schema is up-to-date."""
+    conn, is_postgres = get_db_connection()
+    
+    # Use a dictionary cursor for PostgreSQL to get dict-like results
+    if is_postgres:
+        cursor = conn.cursor(cursor_factory=DictCursor)
+    else:
+        cursor = conn.cursor()
+
+    try:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS messages (
+                id TEXT PRIMARY KEY,
+                encrypted TEXT NOT NULL,
+                created_date TEXT,
+                unlock_date TEXT,
+                sender_name TEXT,
+                recipient_name TEXT,
+                message_title TEXT
+            )
+        ''')
+        
+        # The rest of the schema update logic is not strictly necessary for PostgreSQL
+        # if you manage schema changes with migrations, but for this app, it's fine.
+        if not is_postgres:
+            cursor.execute("PRAGMA table_info(messages)")
+            existing_columns = [column[1] for column in cursor.fetchall()]
+            
+            schema_updates = {
+                'created_date': 'TEXT',
+                'unlock_date': 'TEXT',
+                'sender_name': 'TEXT',
+                'recipient_name': 'TEXT',
+                'message_title': 'TEXT'
+            }
+            
+            for column, col_type in schema_updates.items():
+                if column not in existing_columns:
+                    print(f"Adding missing column: {column}")
+                    cursor.execute(f"ALTER TABLE messages ADD COLUMN {column} {col_type}")
+        
+        conn.commit()
+    finally:
+        conn.close()
 
 def draw_heart(draw, x, y, size, color):
     """Draws a simple, clean heart shape."""
@@ -32,6 +108,99 @@ def draw_heart(draw, x, y, size, color):
         (x + size, y + size * 1.75)
     ]
     draw.polygon(points, fill=color)
+
+# --- ROUTES ---
+@app.route("/", methods=["GET", "POST"])
+def create():
+    if request.method == "POST":
+        if not cipher:
+            return jsonify({"error": "Server configuration error. Encryption not available."}), 500
+            
+        message = request.form["message"]
+        if not message.strip():
+            return jsonify({"error": "Message cannot be empty"}), 400
+        
+        msg_id = str(uuid.uuid4())
+        encrypted = cipher.encrypt(message.encode()).decode()
+        created_date = datetime.datetime.now().isoformat()
+        
+        unlock_date = datetime.date.today().isoformat()
+        
+        try:
+            conn, is_postgres = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                '''INSERT INTO messages (id, encrypted, created_date, unlock_date)
+                   VALUES (?, ?, ?, ?)''',
+                (msg_id, encrypted, created_date, unlock_date)
+            )
+            conn.commit()
+            conn.close()
+            
+            link = url_for("view", msg_id=msg_id, _external=True)
+            return jsonify({"link": link})
+        except Exception as e:
+            app.logger.error(f"Error saving message: {e}")
+            return jsonify({"error": "Failed to save message."}), 500
+
+    return render_template("create.html")
+
+@app.route("/v/<msg_id>")
+def view(msg_id):
+    try:
+        conn, is_postgres = get_db_connection()
+        if is_postgres:
+            cursor = conn.cursor(cursor_factory=DictCursor)
+        else:
+            cursor = conn.cursor()
+        
+        cursor.execute(
+            '''SELECT * FROM messages WHERE id=?''', (msg_id,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row:
+            return render_template("error.html", error="Message not found 💔"), 404
+
+        today = datetime.date.today()
+        
+        # `row` is now a dictionary-like object for both DB types
+        unlock_date_str = row['unlock_date']
+        if unlock_date_str:
+            try:
+                unlock_date = datetime.datetime.fromisoformat(unlock_date_str).date()
+            except ValueError:
+                app.logger.error(f"Invalid date format for unlock_date: {unlock_date_str}")
+                unlock_date = today 
+        else:
+            unlock_date = today 
+
+        unlocked = today >= unlock_date
+
+        message = None
+        if unlocked:
+            if not cipher:
+                 return render_template("error.html", error="Server configuration error. Cannot decrypt message."), 500
+            try:
+                message = cipher.decrypt(row['encrypted'].encode()).decode()
+            except Exception as e:
+                app.logger.error(f"Decryption failed for {msg_id}: {e}")
+                return render_template("error.html", error="This message could not be opened. It may be from an older version of the app. 💔"), 500
+
+        created_date_str = row['created_date']
+        
+        return render_template(
+            "view.html",
+            unlocked=unlocked,
+            message=message,
+            valentines_date=unlock_date.isoformat(),
+            created_date=created_date_str
+        )
+        
+    except Exception as e:
+        app.logger.error(f"Unexpected error viewing message {msg_id}: {type(e).__name__} - {e}")
+        return render_template("error.html", error="Something went wrong while loading the message. 💔"), 50
 
 def draw_floral_corner(draw, x, y, size, color):
     """Draws a decorative floral shape for the corners."""
@@ -90,161 +259,10 @@ def create_gradient_background(width, height, top_color, bottom_color):
     base.paste(top, (0, 0), mask)
     return base
 
-def load_or_generate_key():
-    """Load the encryption key from a file, or generate and save a new one."""
-    if os.path.exists(KEY_FILE):
-        with open(KEY_FILE, "rb") as key_file:
-            key = key_file.read()
-    else:
-        key = Fernet.generate_key()
-        with open(KEY_FILE, "wb") as key_file:
-            key_file.write(key)
-    return key
-
-# Initialize the cipher with the persistent key
-try:
-    cipher = Fernet(load_or_generate_key())
-except Exception as e:
-    print(f"CRITICAL: Could not initialize encryption. {e}")
-    cipher = None 
-
-# --- DATABASE SETUP ---
-DATABASE_PATH = 'database.db'
-
-def get_db():
-    # Check if we're using PostgreSQL or SQLite
-    if DATABASE_URL.startswith("postgres"):
-        conn = psycopg2.connect(DATABASE_URL)
-    else:
-        conn = sqlite3.connect('database.db')
-    conn.row_factory = sqlite3.Row # This will only work for SQLite, but it's fine for fallback
-    return conn
-
-def init_db():
-    """Initialize the database and ensure the schema is up-to-date."""
-    with app.app_context():
-        db = get_db()
-        
-        db.execute('''
-            CREATE TABLE IF NOT EXISTS messages (
-                id TEXT PRIMARY KEY,
-                encrypted TEXT NOT NULL,
-                created_date TEXT,
-                unlock_date TEXT,
-                sender_name TEXT,
-                recipient_name TEXT,
-                message_title TEXT
-            )
-        ''')
-        
-        cursor = db.execute("PRAGMA table_info(messages)")
-        existing_columns = [column[1] for column in cursor.fetchall()]
-        
-        schema_updates = {
-            'created_date': 'TEXT',
-            'unlock_date': 'TEXT',
-            'sender_name': 'TEXT',
-            'recipient_name': 'TEXT',
-            'message_title': 'TEXT'
-        }
-        
-        for column, col_type in schema_updates.items():
-            if column not in existing_columns:
-                print(f"Adding missing column: {column}")
-                db.execute(f"ALTER TABLE messages ADD COLUMN {column} {col_type}")
-        
-        db.commit()
-
-# --- ROUTES ---
-@app.route("/", methods=["GET", "POST"])
-def create():
-    if request.method == "POST":
-        if not cipher:
-            return jsonify({"error": "Server configuration error. Encryption not available."}), 500
-            
-        message = request.form["message"]
-        if not message.strip():
-            return jsonify({"error": "Message cannot be empty"}), 400
-        
-        msg_id = str(uuid.uuid4())
-        encrypted = cipher.encrypt(message.encode()).decode()
-        created_date = datetime.datetime.now().isoformat()
-        
-        # Set unlock date to today for immediate access
-        unlock_date = datetime.date(2026, 2, 14).isoformat()
-        # unlock_date = datetime.date.today().isoformat()
-        
-        try:
-            db = get_db()
-            db.execute(
-                '''INSERT INTO messages (id, encrypted, created_date, unlock_date)
-                   VALUES (?, ?, ?, ?)''',
-                (msg_id, encrypted, created_date, unlock_date)
-            )
-            db.commit()
-            link = url_for("view", msg_id=msg_id, _external=True)
-            return jsonify({"link": link})
-        except Exception as e:
-            app.logger.error(f"Error saving message: {e}")
-            return jsonify({"error": "Failed to save message."}), 500
-
-    return render_template("create.html")
-
-@app.route("/v/<msg_id>")
-def view(msg_id):
-    try:
-        db = get_db()
-        cursor = db.execute(
-            '''SELECT * FROM messages WHERE id=?''', (msg_id,)
-        )
-        row = cursor.fetchone()
-
-        if not row:
-            return render_template("error.html", error="Message not found 💔"), 404
-
-        today = datetime.date.today()
-        
-        unlock_date_str = row['unlock_date']
-        if unlock_date_str:
-            try:
-                unlock_date = datetime.datetime.fromisoformat(unlock_date_str).date()
-            except ValueError:
-                app.logger.error(f"Invalid date format for unlock_date: {unlock_date_str}")
-                unlock_date = today 
-        else:
-            unlock_date = today 
-
-        unlocked = today >= unlock_date
-
-        message = None
-        if unlocked:
-            if not cipher:
-                 return render_template("error.html", error="Server configuration error. Cannot decrypt message."), 500
-            try:
-                message = cipher.decrypt(row['encrypted'].encode()).decode()
-            except Exception as e:
-                app.logger.error(f"Decryption failed for {msg_id}: {e}")
-                return render_template("error.html", error="This message could not be opened. It may be from an older version of the app. 💔"), 500
-
-        created_date_str = row['created_date']
-        
-        return render_template(
-            "view.html",
-            unlocked=unlocked,
-            message=message,
-            valentines_date=unlock_date.isoformat(),
-            created_date=created_date_str
-        )
-        
-    except Exception as e:
-        app.logger.error(f"Unexpected error viewing message {msg_id}: {type(e).__name__} - {e}")
-        return render_template("error.html", error="Something went wrong while loading the message. 💔"), 500
-
-
 @app.route("/generate-image/<msg_id>")
 def generate_image(msg_id):
     try:
-        db = get_db()
+        db = get_db_connection()
         cursor = db.execute("SELECT encrypted FROM messages WHERE id=?", (msg_id,))
         row = cursor.fetchone()
 
@@ -350,6 +368,13 @@ def generate_image(msg_id):
     except Exception as e:
         app.logger.error(f"Error generating image: {str(e)}")
         return "Failed to generate image", 500
+
+@app.route('/favicon.ico')
+def favicon():
+    # You can return a 204 No Content response
+    return '', 204
+    # Or, if you have a favicon.ico file in your static folder:
+    # return send_from_directory(os.path.join(app.root_path, 'static'), 'favicon.ico', mimetype='image/vnd.microsoft.icon')
     
 
 # --- STARTUP ---
