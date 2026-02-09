@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <!-- Basic meta tags for character encoding and viewport -->
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Valentine Capsule</title>
+
+    <!-- Google Fonts - Pacifico for handwriting style -->
+    <link href="https://fonts.googleapis.com/css2?family=Pacifico&display=swap" rel="stylesheet">
+
+    <!-- Stylesheet -->
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body class="home">
+
+<!-- Dark mode toggle button -->
+<button class="dark-toggle" onclick="toggleDark(this)" aria-label="Toggle dark mode">
+    ☀️
+</button>
+
+<!-- Main content container -->
+<div class="home-container fade-in">
+
+    <header>
+        <h1>Valentine Capsule</h1>
+        <p class="subtitle">
+            Seal your love, reveal in time
+        </p>
+    </header>
+
+    <!-- Main content area that gets replaced after submission -->
+    <main id="contentArea">
+        <section id="message-creation">
+            <form id="loveForm">
+                <div id="inputArea">
+                    <!-- Message textarea with auto-resize -->
+                    <textarea
+                        name="message"
+                        class="love-input"
+                        rows="7"
+                        placeholder="Write something you'd want remembered…"
+                        required></textarea>
+
+                    <!-- Font toggle button -->
+                    <button type="button" class="font-toggle" onclick="toggleFont(this)">
+                        Switch to handwriting
+                    </button>
+
+                    <!-- Word counter display -->
+                    <div id="wordCount" class="word-count">
+                        0 words written from the heart
+                    </div>
+
+                    <!-- Submit button -->
+                    <button class="primary-btn" type="submit">
+                        Seal the Letter 💌
+                    </button>
+                </div>
+            </form>
+        </section>
+    </main>
+
+    <!-- Share link box (initially hidden) -->
+    <section id="linkBox" class="link-box hidden">
+        <h2>Your Valentine Capsule is ready 💖</h2>
+        <div class="link-row">
+            <input id="shareLink" readonly />
+            <button type="button" onclick="copyLink()">Copy</button>
+        </div>
+        <p class="share-instructions">
+            Share this link with your loved one ❤️
+        </p>
+    </section>
+
+</div>
+
+<!-- Ink cursor effect (desktop only) -->
+<div class="ink-cursor" id="ink"></div>
+
+<!-- Footer with credits -->
+<footer class="credit">
+    made with ❤️ <br>
+    <a href="https://www.linkedin.com/in/siddiqurrahman1/" target="_blank" rel="noopener">
+        Md. Siddiqur Rahman | LinkedIn
+    </a>
+</footer>
+
+<!-- ================= SCRIPTS ================= -->
+
+<!-- Dark mode functionality -->
+<script>
+/**
+ * Toggles between light and dark mode
+ * @param {HTMLElement} btn - The button element that triggered the toggle
+ */
+function toggleDark(btn) {
+    // Toggle the 'dark' class on the body element
+    document.body.classList.toggle("dark");
+    // Update the button icon based on current mode
+    btn.textContent = document.body.classList.contains("dark") ? "🌙" : "☀️";
+}
+</script>
+
+<!-- Ink cursor effect for desktop -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Get the ink cursor element
+    const ink = document.getElementById("ink");
+    
+    // Only show ink cursor on non-touch devices
+    if (!("ontouchstart" in window)) {
+        // Update cursor position on mouse movement
+        document.addEventListener("mousemove", (e) => {
+            ink.style.left = e.clientX + "px";
+            ink.style.top = e.clientY + "px";
+        });
+    } else {
+        // Hide cursor on touch devices
+        ink.style.display = "none";
+    }
+});
+</script>
+
+<!-- Message input functionality -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Get DOM elements
+    const textarea = document.querySelector(".love-input");
+    const counter = document.getElementById("wordCount");
+    
+    // Handle textarea input events
+    textarea.addEventListener("input", () => {
+        // Auto-resize textarea
+        textarea.style.height = "auto";
+        textarea.style.height = textarea.scrollHeight + "px";
+
+        // Update word count
+        const words = textarea.value.trim().split(/\s+/).filter(Boolean);
+        counter.textContent = `${words.length} words written from the heart`;
+    });
+
+    // Prevent pasting to encourage original writing
+    textarea.addEventListener("paste", (e) => {
+        e.preventDefault();
+        alert("Write it from the heart 💖");
+    });
+});
+</script>
+
+<!-- Font toggle functionality -->
+<script>
+/**
+ * Toggles between normal and handwriting font styles
+ * @param {HTMLElement} btn - The button element that triggered the toggle
+ */
+function toggleFont(btn) {
+    // Get the textarea element
+    const input = document.querySelector(".love-input");
+    
+    // Toggle the handwritten class
+    input.classList.toggle("handwritten");
+
+    // Update button text based on current state
+    btn.textContent = input.classList.contains("handwritten")
+        ? "Switch to normal"
+        : "Switch to handwriting";
+}
+</script>
+
+<!-- Form submission and link sharing functionality -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Get form element
+    const form = document.getElementById("loveForm");
+    
+    // Handle form submission
+    form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+
+        // Create and show seal overlay
+        const overlay = document.createElement("div");
+        overlay.className = "seal";
+        overlay.textContent = "Sealing your words… 💌";
+        document.body.appendChild(overlay);
+
+        // Create form data
+        const formData = new FormData(form);
+
+        try {
+            // Send form data to server
+            const res = await fetch("/", {
+                method: "POST",
+                body: formData
+            });
+            
+            // Check for HTTP errors
+            if (!res.ok) {
+                throw new Error(`HTTP error! status: ${res.status}`);
+            }
+            
+            // Parse response data
+            const data = await res.json();
+
+            // Handle error response
+            if (data.error) {
+                alert(data.error);
+                return;
+            }
+
+            // Replace content area with link box
+            const contentArea = document.getElementById("contentArea");
+            contentArea.innerHTML = '';
+            
+            // Show the link box with the generated link
+            const linkBox = document.getElementById("linkBox");
+            document.getElementById("shareLink").value = data.link;
+            linkBox.classList.remove("hidden");
+
+        } catch (err) {
+            console.error("Error:", err);
+            alert("Something went wrong. Please try again 💔");
+        } finally {
+            // Remove overlay after a delay
+            setTimeout(() => overlay.remove(), 800);
+        }
+    });
+});
+
+/**
+ * Copies the share link to clipboard with fallback methods
+ */
+function copyLink() {
+    // Get input element and button
+    const input = document.getElementById("shareLink");
+    const btn = event.target;
+    const originalText = btn.textContent;
+
+    // Try modern Clipboard API first
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(input.value).then(() => {
+            showCopySuccess(btn, originalText);
+        }).catch(err => {
+            console.error("Clipboard API failed:", err);
+            // Fallback to older method
+            fallbackCopyTextToClipboard(input.value, btn, originalText);
+        });
+    } else {
+        // Browser doesn't support Clipboard API, use fallback directly
+        fallbackCopyTextToClipboard(input.value, btn, originalText);
+    }
+}
+
+/**
+ * Fallback copy method for older browsers
+ * @param {string} text - The text to copy
+ * @param {HTMLElement} btn - The button element
+ * @param {string} originalText - The original button text
+ */
+function fallbackCopyTextToClipboard(text, btn, originalText) {
+    // Create a temporary textarea element
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    
+    // Position it off-screen
+    textArea.style.top = "0";
+    textArea.style.left = "0";
+    textArea.style.position = "fixed";
+
+    // Add to DOM, select, and copy
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+
+    try {
+        // Try to execute copy command
+        const successful = document.execCommand('copy');
+        if (successful) {
+            showCopySuccess(btn, originalText);
+        } else {
+            showCopyError(btn, originalText);
+        }
+    } catch (err) {
+        console.error("Fallback: Oops, unable to copy", err);
+        showCopyError(btn, originalText);
+    }
+
+    // Clean up
+    document.body.removeChild(textArea);
+}
+
+/**
+ * Shows visual feedback for successful copy
+ * @param {HTMLElement} btn - The button element
+ * @param {string} originalText - The original button text
+ */
+function showCopySuccess(btn, originalText) {
+    btn.textContent = "Copied! 💌";
+    btn.style.background = "#4CAF50"; // Green
+
+    setTimeout(() => {
+        btn.textContent = originalText;
+        btn.style.background = "#b76e79"; // Original pink
+    }, 2000);
+}
+
+/**
+ * Shows visual feedback for failed copy
+ * @param {HTMLElement} btn - The button element
+ * @param {string} originalText - The original button text
+ */
+function showCopyError(btn, originalText) {
+    btn.textContent = "Failed!";
+    btn.style.background = "#f44336"; // Red
+
+    setTimeout(() => {
+        btn.textContent = originalText;
+        btn.style.background = "#b76e79"; // Original pink
+    }, 2000);
+    
+    alert("Could not copy link automatically. Please select the text in the box and copy it manually (Ctrl+C).");
+}
+</script>
+
+</body>
+</html>

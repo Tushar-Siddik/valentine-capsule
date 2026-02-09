@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <!-- Basic meta tags for character encoding and viewport -->
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Valentine Reveal</title>
+    
+    <!-- Stylesheet link -->
+    <link rel="stylesheet" href="/static/style.css">
+    
+    <!-- Google Fonts - Playfair Display for elegant typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Pacifico&display=swap" rel="stylesheet">
+</head>
+
+<body>
+
+<!-- Dark mode toggle button -->
+<button class="dark-toggle" onclick="toggleDark(this)" aria-label="Toggle dark mode">
+    ☀️
+</button>
+
+<!-- Animated hearts background canvas -->
+<canvas id="heart"></canvas>
+
+<!-- Main content container -->
+<div class="container fade-in">
+
+{% if not unlocked %}
+    <!-- Section shown when message is not yet unlocked -->
+    <section id="countdown-section">
+        <h1>⏳ Love is learning patience</h1>
+        <p id="timer" style="font-size:1.3em;"></p>
+    </section>
+
+{% else %}
+    <!-- Section shown when message is unlocked -->
+    <section id="message-section">
+        <!-- Background music (autoplay if browser allows) -->
+        <audio autoplay loop>
+            <source src="/static/romantic-piano-128.mp3" type="audio/mpeg">
+        </audio>
+
+        <!-- Message card container - this is what gets captured for the keepsake image -->
+        <div id="capture" class="message-card fade-in">
+            <h1>💖 A moment your heart wrote… now gently unfolding</h1>
+            <div class="message">{{ message }}</div>
+        </div>
+
+        <!-- Download button for the keepsake image -->
+        <button class="primary-btn" onclick="downloadImage()">
+            Download as Keepsake 📸
+        </button>
+    </section>
+{% endif %}
+
+</div>
+
+<!-- Footer with credits -->
+<footer class="credit">
+    made with ❤️ <br>
+    <a href="https://www.linkedin.com/in/siddiqurrahman1/" target="_blank" rel="noopener">
+        Md. Siddiqur Rahman | LinkedIn
+    </a>
+</footer>
+
+<!-- ================= SCRIPTS ================= -->
+<!-- External scripts -->
+<script src="/static/heart.js"></script>
+
+<!-- Dark mode functionality -->
+<script>
+/**
+ * Toggles between light and dark mode
+ * @param {HTMLElement} btn - The button element that triggered the toggle
+ */
+function toggleDark(btn) {
+    // Toggle the 'dark' class on the body element
+    document.body.classList.toggle("dark");
+    // Update the button icon based on current mode
+    btn.textContent = document.body.classList.contains("dark") ? "🌙" : "☀️";
+}
+</script>
+
+<!-- Countdown timer functionality -->
+<script>
+/**
+ * Displays a countdown timer until the message is unlocked
+ */
+document.addEventListener('DOMContentLoaded', function() {
+    // Get the unlock date from the template
+    const unlockDate = new Date("{{ valentines_date }}");
+    const timer = document.getElementById("timer");
+
+    // Only run the timer if the timer element exists
+    if (timer) {
+        const interval = setInterval(() => {
+            // Calculate time difference between now and unlock date
+            const diff = unlockDate - new Date();
+            
+            // If the countdown is finished, reload the page to show the message
+            if (diff <= 0) {
+                clearInterval(interval);
+                location.reload();
+                return;
+            }
+
+            // Calculate days remaining
+            const days = Math.floor(diff / (1000*60*60*24));
+            // Update the timer display
+            timer.textContent = `${days} day${days !== 1 ? 's' : ''} until love reveals itself 💕`;
+        }, 1000); // Update every second
+    }
+});
+</script>
+
+<!-- Creation date display -->
+<script>
+/**
+ * Displays when the message was created
+ */
+document.addEventListener('DOMContentLoaded', function() {
+    // Get the creation date from the template
+    const createdDate = new Date("{{ created_date }}");
+    
+    // Create a new paragraph element
+    const dateDisplay = document.createElement("p");
+    dateDisplay.textContent = `Created on ${createdDate.toLocaleDateString()}`;
+    dateDisplay.style.fontSize = "0.9em";
+    dateDisplay.style.opacity = "0.7";
+    
+    // Add it to the container
+    document.querySelector(".container").appendChild(dateDisplay);
+});
+</script>
+
+<!-- Audio playback functionality -->
+<script>
+/**
+ * Handles audio playback with fallback for browsers that block autoplay
+ */
+window.addEventListener("load", () => {
+    const audio = document.querySelector("audio");
+    if(audio) {
+        // Try to play the audio
+        audio.play().catch(() => {
+            // If autoplay is blocked, log a message
+            console.log("Autoplay blocked, user interaction needed to play music");
+        });
+    }
+});
+</script>
+
+<!-- Image download functionality -->
+<script>
+/**
+ * Downloads the message as a keepsake image by calling the server
+ */
+function downloadImage() {
+    // Extract the message ID from the current URL
+    const pathParts = window.location.pathname.split('/');
+    const msgId = pathParts[pathParts.length - 1];
+
+    // Validate that we have a message ID
+    if (!msgId) {
+        alert("Could not find message ID.");
+        return;
+    }
+
+    // Get the button that triggered this function
+    const btn = event.target;
+    const originalText = btn.textContent;
+    
+    // Update button to show generating state
+    btn.textContent = "Generating... ⏳";
+    btn.disabled = true;
+
+    // Construct the URL for the server endpoint
+    const imageUrl = `/generate-image/${msgId}`;
+
+    // Create a temporary link element to trigger the download
+    const link = document.createElement('a');
+    link.href = imageUrl;
+    link.download = 'valentine-keepsake.png'; // Suggest a filename
+    
+    // Add to DOM, click, and remove
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    // Restore the button after a short delay
+    setTimeout(() => {
+        btn.textContent = originalText;
+        btn.disabled = false;
+    }, 2000);
+}
+</script>
+
+</body>
+</html>
