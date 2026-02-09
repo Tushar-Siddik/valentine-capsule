@@ -41,28 +41,37 @@ except Exception as e:
 DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///database.db')
 
 def get_db_connection():
-    """Returns a database connection and a boolean indicating if it's PostgreSQL."""
-    if DATABASE_URL.startswith("postgres"):
-        conn = psycopg2.connect(DATABASE_URL)
-        return conn, True
-    else:
-        conn = sqlite3.connect('database.db')
-        conn.row_factory = sqlite3.Row # Make SQLite return dict-like rows
-        return conn, False
-
-def init_db():
-    """Initialize the database and ensure the schema is up-to-date."""
-    conn, is_postgres = get_db_connection()
+    """Returns a database connection and a boolean indicating if it's PostgreSQL.
+    Also ensures the 'message' table exists."""
+    is_postgres = DATABASE_URL.startswith("postgres")
     
-    # Use a dictionary cursor for PostgreSQL to get dict-like results
     if is_postgres:
+        conn = psycopg2.connect(DATABASE_URL)
         cursor = conn.cursor(cursor_factory=DictCursor)
     else:
+        conn = sqlite3.connect('database.db')
+        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
-    try:
+    # --- ROBUST AUTO-INITIALIZATION ---
+    # Check if the 'message' table exists
+    if is_postgres:
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public' AND table_name = 'message'
+            );
+        """)
+        table_exists = cursor.fetchone()[0]
+    else: # SQLite
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='message';")
+        table_exists = cursor.fetchone() is not None
+
+    # If the table does not exist, create it
+    if not table_exists:
+        app.logger.info("Table 'message' not found, creating it...")
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS message (
+            CREATE TABLE message (
                 id TEXT PRIMARY KEY,
                 encrypted TEXT NOT NULL,
                 created_date TEXT,
@@ -72,29 +81,11 @@ def init_db():
                 message_title TEXT
             )
         ''')
-        
-        # The rest of the schema update logic is not strictly necessary for PostgreSQL
-        # if you manage schema changes with migrations, but for this app, it's fine.
-        if not is_postgres:
-            cursor.execute("PRAGMA table_info(message)")
-            existing_columns = [column[1] for column in cursor.fetchall()]
-            
-            schema_updates = {
-                'created_date': 'TEXT',
-                'unlock_date': 'TEXT',
-                'sender_name': 'TEXT',
-                'recipient_name': 'TEXT',
-                'message_title': 'TEXT'
-            }
-            
-            for column, col_type in schema_updates.items():
-                if column not in existing_columns:
-                    print(f"Adding missing column: {column}")
-                    cursor.execute(f"ALTER TABLE message ADD COLUMN {column} {col_type}")
-        
         conn.commit()
-    finally:
-        conn.close()
+        app.logger.info("Table 'message' created successfully.")
+    
+    # Return the connection and the DB type
+    return conn, is_postgres
 
 def draw_heart(draw, x, y, size, color):
     """Draws a simple, clean heart shape."""
@@ -393,5 +384,4 @@ def favicon():
 
 # --- STARTUP ---
 if __name__ == "__main__":
-    init_db()
     app.run(debug=True, host='0.0.0.0', port=5000)
