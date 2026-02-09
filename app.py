@@ -115,7 +115,8 @@ def create():
         encrypted = cipher.encrypt(message.encode()).decode()
         created_date = datetime.datetime.now().isoformat()
         
-        unlock_date = datetime.date.today().isoformat()
+        # unlock_date = datetime.date.today().isoformat()
+        unlock_date = datetime.date(2026, 2, 14).isoformat()
         
         try:
             conn, is_postgres = get_db_connection()
