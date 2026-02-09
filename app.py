@@ -129,11 +129,12 @@ def create():
         try:
             conn, is_postgres = get_db_connection()
             cursor = conn.cursor()
-            cursor.execute(
-                '''INSERT INTO messages (id, encrypted, created_date, unlock_date)
-                   VALUES (?, ?, ?, ?)''',
-                (msg_id, encrypted, created_date, unlock_date)
-            )
+            if is_postgres:
+                sql = "INSERT INTO messages (id, encrypted, created_date, unlock_date) VALUES (%s, %s, %s, %s)"
+            else:
+                sql = "INSERT INTO messages (id, encrypted, created_date, unlock_date) VALUES (?, ?, ?, ?)"
+            
+            cursor.execute(sql, (msg_id, encrypted, created_date, unlock_date))
             conn.commit()
             conn.close()
             
@@ -154,9 +155,12 @@ def view(msg_id):
         else:
             cursor = conn.cursor()
         
-        cursor.execute(
-            '''SELECT * FROM messages WHERE id=?''', (msg_id,)
-        )
+        if is_postgres:
+            sql = "SELECT * FROM messages WHERE id=%s"
+        else:
+            sql = "SELECT * FROM messages WHERE id=?"
+
+        cursor.execute(sql, (msg_id,))
         row = cursor.fetchone()
         conn.close()
 
@@ -262,8 +266,18 @@ def create_gradient_background(width, height, top_color, bottom_color):
 @app.route("/generate-image/<msg_id>")
 def generate_image(msg_id):
     try:
-        db = get_db_connection()
-        cursor = db.execute("SELECT encrypted FROM messages WHERE id=?", (msg_id,))
+        conn, is_postgres = get_db_connection()
+        if is_postgres:
+            cursor = conn.cursor(cursor_factory=DictCursor)
+        else:
+            cursor = conn.cursor()
+        
+        if is_postgres:
+            sql = "SELECT encrypted FROM messages WHERE id=%s"
+        else:
+            sql = "SELECT encrypted FROM messages WHERE id=?"
+
+        cursor.execute(sql, (msg_id,))
         row = cursor.fetchone()
 
         if not row:
