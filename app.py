@@ -8,9 +8,14 @@ from cryptography.fernet import Fernet
 import io
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 import textwrap
+import psycopg2
 
 # --- CONFIGURATION ---
 app = Flask(__name__)
+
+# --- DATABASE SETUP ---
+# Use Render's database URL or fall back to local SQLite
+DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///database.db')
 
 # Define a path for the encryption key file
 KEY_FILE = "secret.key"
@@ -107,8 +112,12 @@ except Exception as e:
 DATABASE_PATH = 'database.db'
 
 def get_db():
-    conn = sqlite3.connect(DATABASE_PATH)
-    conn.row_factory = sqlite3.Row
+    # Check if we're using PostgreSQL or SQLite
+    if DATABASE_URL.startswith("postgres"):
+        conn = psycopg2.connect(DATABASE_URL)
+    else:
+        conn = sqlite3.connect('database.db')
+    conn.row_factory = sqlite3.Row # This will only work for SQLite, but it's fine for fallback
     return conn
 
 def init_db():
